@@ -8,7 +8,7 @@ const app = express();
 
 // Configure CORS to allow specific origin
 app.use(cors({
-  origin: 'https://loc-ivory.vercel.app', // Allow only your frontend origin
+  origin: 'https://loc-ivory.vercel.app/', // Allow only your frontend origin
   methods: ['GET', 'POST', 'OPTIONS'], // Allow specific methods
   allowedHeaders: ['Content-Type'], // Allow specific headers
   credentials: false // Set to true if you need to send cookies or auth headers
@@ -18,6 +18,12 @@ app.use(bodyParser.json());
 
 // Enable preflight for all routes
 app.options('*', cors()); // Handle preflight OPTIONS requests for all routes
+
+
+// Root route to handle GET /
+app.get('/', (req, res) => {
+  res.json({ message: 'Welcome to the Loan Application API' });
+});
 
 const dbConfig = {
   host: process.env.DB_HOST || 'localhost',
