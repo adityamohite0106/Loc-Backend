@@ -1,24 +1,20 @@
 const express = require('express');
-const mysql = require('mysql2/promise'); // Use promise version
+const mysql = require('mysql2/promise');
 const bodyParser = require('body-parser');
 const cors = require('cors');
-require('dotenv').config(); // Load environment variables
+require('dotenv').config();
 
 const app = express();
 
-// Configure CORS to allow specific origin
+// Configure CORS
 app.use(cors({
-  origin: 'https://loc-ivory.vercel.app/', // Allow only your frontend origin
-  methods: ['GET', 'POST', 'OPTIONS'], // Allow specific methods
-  allowedHeaders: ['Content-Type'], // Allow specific headers
-  credentials: false // Set to true if you need to send cookies or auth headers
+  origin: 'https://loc-ivory.vercel.app', // Remove trailing slash
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type'],
+  credentials: false
 }));
 
 app.use(bodyParser.json());
-
-// Enable preflight for all routes
-app.options('*', cors()); // Handle preflight OPTIONS requests for all routes
-
 
 // Root route to handle GET /
 app.get('/', (req, res) => {
@@ -29,22 +25,18 @@ const dbConfig = {
   host: process.env.DB_HOST || 'localhost',
   user: process.env.DB_USER || 'root',
   password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'loan_db',
+  database: process.env.DB_NAME || 'sql12799179',
   port: process.env.DB_PORT || 3306
 };
 
-
-
-
-
-// Create connection pool for better performance
+// Create connection pool
 const pool = mysql.createPool(dbConfig);
 
-// ✅ Test connection after pool is created
+// Test database connection
 (async () => {
   try {
     const connection = await pool.getConnection();
-    await connection.query('SELECT 1'); // simple test query
+    await connection.query('SELECT 1');
     connection.release();
     console.log('✅ Database connection successful!');
   } catch (err) {
@@ -52,9 +44,11 @@ const pool = mysql.createPool(dbConfig);
   }
 })();
 
-
 app.post('/api/submit-loan', async (req, res) => {
   const formData = req.body;
+
+  // Log incoming formData for debugging
+  console.log('Received formData:', JSON.stringify(formData, null, 2));
 
   // Validate required fields
   if (!formData.newApplication?.custNo || !formData.newApplication?.custName || !formData.newApplication?.appNo) {
@@ -101,7 +95,7 @@ app.post('/api/submit-loan', async (req, res) => {
       sanitizeValue(newApp.loanFormSubmittedDateHead),
       sanitizeValue(newApp.officerBoardResolutionNo)
     ];
-
+    console.log('newAppValues:', newAppValues);
     const [newAppResult] = await connection.execute(newAppQuery, newAppValues);
     const application_id = newAppResult.insertId;
 
@@ -123,12 +117,13 @@ app.post('/api/submit-loan', async (req, res) => {
         sanitizeValue(cust.state),
         sanitizeValue(cust.pin)
       ];
-
+      console.log('custValues:', custValues);
       const [custResult] = await connection.execute(custQuery, custValues);
       const customer_id = custResult.insertId;
 
       // 3️⃣ Insert bankDetails
-      const bank = formData.bankDetails?.accounts?.[0] || {};
+      const bankDetails = formData.bankDetails || {};
+      const bank = Array.isArray(bankDetails.accounts) && bankDetails.accounts.length > 0 ? bankDetails.accounts[0] : {};
       if (Object.keys(bank).length > 0) {
         const bankQuery = `
           INSERT INTO bank_details (customer_id, bank_name, branch_name, account_no, ifsc_code, account_type)
@@ -142,6 +137,7 @@ app.post('/api/submit-loan', async (req, res) => {
           sanitizeValue(bank.ifscCode),
           sanitizeValue(bank.type || bank.accountType)
         ];
+        console.log('bankValues:', bankValues);
         await connection.execute(bankQuery, bankValues);
       }
 
@@ -159,11 +155,12 @@ app.post('/api/submit-loan', async (req, res) => {
           sanitizeValue(property.personalAssetsMortgaged),
           sanitizeValue(property.otherAssetsShares)
         ];
+        console.log('propertyValues:', propertyValues);
         const [propertyResult] = await connection.execute(propertyQuery, propertyValues);
         property_id = propertyResult.insertId;
 
         // 4a. Insert firmDetails
-        if (property.firmDetails && Array.isArray(property.firmDetails)) {
+        if (Array.isArray(property.firmDetails)) {
           for (const firm of property.firmDetails) {
             const firmQuery = `
               INSERT INTO firm_details (property_id, name, business, relation, bank_name)
@@ -171,18 +168,19 @@ app.post('/api/submit-loan', async (req, res) => {
             `;
             const firmValues = [
               property_id,
-              sanitizeValue(firm.name),
-              sanitizeValue(firm.business),
-              sanitizeValue(firm.relation),
-              sanitizeValue(firm.bankName)
+              sanitizeValue(firm?.name),
+              sanitizeValue(firm?.business),
+              sanitizeValue(firm?.relation),
+              sanitizeValue(firm?.bankName)
             ];
+            console.log('firmValues:', firmValues);
             await connection.execute(firmQuery, firmValues);
           }
         }
       }
 
       // 5️⃣ Insert policy_details
-      if (formData.policyDetails?.policies && Array.isArray(formData.policyDetails.policies)) {
+      if (Array.isArray(formData.policyDetails?.policies)) {
         for (const policy of formData.policyDetails.policies) {
           const policyQuery = `
             INSERT INTO policy_details (customer_id, company_name, policy_no, period, total_paid)
@@ -190,17 +188,18 @@ app.post('/api/submit-loan', async (req, res) => {
           `;
           const policyValues = [
             customer_id,
-            sanitizeValue(policy.companyName),
-            sanitizeValue(policy.policyNo),
-            sanitizeValue(policy.period),
-            parseFloat(sanitizeValue(policy.totalPaid)) || 0
+            sanitizeValue(policy?.companyName),
+            sanitizeValue(policy?.policyNo),
+            sanitizeValue(policy?.period),
+            parseFloat(sanitizeValue(policy?.totalPaid)) || 0
           ];
+          console.log('policyValues:', policyValues);
           await connection.execute(policyQuery, policyValues);
         }
       }
 
       // 6️⃣ Insert guarantor_details
-      if (formData.guarantorDetails?.guarantors && Array.isArray(formData.guarantorDetails.guarantors)) {
+      if (Array.isArray(formData.guarantorDetails?.guarantors)) {
         for (const guar of formData.guarantorDetails.guarantors) {
           const guarQuery = `
             INSERT INTO guarantor_details (customer_id, branch, name, amount, institute)
@@ -208,17 +207,18 @@ app.post('/api/submit-loan', async (req, res) => {
           `;
           const guarantorValues = [
             customer_id,
-            sanitizeValue(guar.branch),
-            sanitizeValue(guar.name || guar.whom),
-            parseFloat(sanitizeValue(guar.amount)) || 0,
-            sanitizeValue(guar.institute)
+            sanitizeValue(guar?.branch),
+            sanitizeValue(guar?.name || guar?.whom),
+            parseFloat(sanitizeValue(guar?.amount)) || 0,
+            sanitizeValue(guar?.institute)
           ];
+          console.log('guarantorValues:', guarantorValues);
           await connection.execute(guarQuery, guarantorValues);
         }
       }
 
       // 7️⃣ Insert directors_partners
-      if (formData.directorPartner?.rows && Array.isArray(formData.directorPartner.rows)) {
+      if (Array.isArray(formData.directorPartner?.rows)) {
         for (const dir of formData.directorPartner.rows) {
           const dirQuery = `
             INSERT INTO directors_partners (customer_id, type, name, dob, share, qualification)
@@ -226,18 +226,19 @@ app.post('/api/submit-loan', async (req, res) => {
           `;
           const dirValues = [
             customer_id,
-            sanitizeValue(formData.directorPartner.type),
-            sanitizeValue(dir.name),
-            sanitizeValue(dir.dob),
-            parseFloat(sanitizeValue(dir.share)) || 0,
-            sanitizeValue(dir.qualification)
+            sanitizeValue(formData.directorPartner?.type),
+            sanitizeValue(dir?.name),
+            sanitizeValue(dir?.dob),
+            parseFloat(sanitizeValue(dir?.share)) || 0,
+            sanitizeValue(dir?.qualification)
           ];
+          console.log('dirValues:', dirValues);
           await connection.execute(dirQuery, dirValues);
         }
       }
 
       // 8️⃣ Insert income_returns
-      if (formData.incomeReturns?.itReturns && Array.isArray(formData.incomeReturns.itReturns)) {
+      if (Array.isArray(formData.incomeReturns?.itReturns)) {
         for (const it of formData.incomeReturns.itReturns) {
           const itQuery = `
             INSERT INTO income_returns (customer_id, accounting_year, ay_year, taxable_income)
@@ -245,16 +246,17 @@ app.post('/api/submit-loan', async (req, res) => {
           `;
           const itValues = [
             customer_id,
-            sanitizeValue(it.accountingYear),
-            sanitizeValue(it.ayYear),
-            parseFloat(sanitizeValue(it.taxableIncome)) || 0
+            sanitizeValue(it?.accountingYear),
+            sanitizeValue(it?.ayYear),
+            parseFloat(sanitizeValue(it?.taxableIncome)) || 0
           ];
+          console.log('itValues:', itValues);
           await connection.execute(itQuery, itValues);
         }
       }
 
       // Insert purchase_sales
-      if (formData.incomeReturns?.purchaseSale3Years && Array.isArray(formData.incomeReturns.purchaseSale3Years)) {
+      if (Array.isArray(formData.incomeReturns?.purchaseSale3Years)) {
         for (const ps of formData.incomeReturns.purchaseSale3Years) {
           const psQuery = `
             INSERT INTO purchase_sales (customer_id, financial_year, purchase_rs, sales_rs)
@@ -262,10 +264,11 @@ app.post('/api/submit-loan', async (req, res) => {
           `;
           const psValues = [
             customer_id,
-            sanitizeValue(ps.financialYear),
-            parseFloat(sanitizeValue(ps.purchaseRs)) || 0,
-            parseFloat(sanitizeValue(ps.salesRs)) || 0
+            sanitizeValue(ps?.financialYear),
+            parseFloat(sanitizeValue(ps?.purchaseRs)) || 0,
+            parseFloat(sanitizeValue(ps?.salesRs)) || 0
           ];
+          console.log('psValues:', psValues);
           await connection.execute(psQuery, psValues);
         }
       }
@@ -290,16 +293,17 @@ app.post('/api/submit-loan', async (req, res) => {
           sanitizeValue(shares.remark),
           sanitizeValue(shares.paymentMode)
         ];
+        console.log('sharesValues:', sharesValues);
         await connection.execute(sharesQuery, sharesValues);
       }
     }
 
-    // ✅ Commit transaction
+    // Commit transaction
     await connection.commit();
     res.json({ message: 'Application submitted successfully', application_id });
 
   } catch (error) {
-    // ❌ Rollback transaction on error
+    // Rollback transaction on error
     await connection.rollback();
     console.error('Transaction error:', error);
     console.error('Error details:', {
@@ -311,12 +315,11 @@ app.post('/api/submit-loan', async (req, res) => {
     });
     res.status(500).json({ error: 'Failed to submit application', details: error.message });
   } finally {
-    // Always release the connection
     connection.release();
   }
 });
 
-// Test endpoint to verify database connection
+// Test endpoint
 app.get('/api/test', async (req, res) => {
   try {
     const connection = await pool.getConnection();
@@ -333,6 +336,14 @@ app.get('/api/test', async (req, res) => {
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);
   res.status(500).json({ error: 'Internal server error' });
+});
+
+// Handle uncaught exceptions and rejections
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+});
+process.on('unhandledRejection', (err) => {
+  console.error('Unhandled Rejection:', err);
 });
 
 app.listen(process.env.PORT || 5000, () => console.log(`Server running on http://localhost:${process.env.PORT || 5000}`));
